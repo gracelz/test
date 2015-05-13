@@ -1,4 +1,3 @@
-大家好，这个专栏会分析 [RapidJSON][rapidjson] （[中文使用手册][userguide-zh]）中一些有趣的 C++ 代码，希望对读者有所裨益。
 
 ## C++ 语法解说
 
@@ -11,9 +10,6 @@ bool StartArray() {
 }
 ~~~
 
-或许你会问，这是什么C++语法？
-
-这里其实用了两个可能较少接触的C++特性。第一个是 [placement `new`][placement new]，第二个是 [`template` disambiguator][template disambiguator]。
 
 ## Placement `new`
 
@@ -23,17 +19,6 @@ bool StartArray() {
 new (T*) T(...);
 ~~~
 
-第一个括号中的是给定的指针，它指向足够放下 `T` 类型的内存空间。而 `T(...)` 则是一个构造函数调用。那么，上面 `StartArary()` 里的代码，分开来写就是：
-
-~~~cpp
-bool StartArray() {
-    ValueType* v = stack_.template Push<ValueType>(); // (1)
-    new (v) ValueType(kArrayType);                    // (2)
-    return true;
-}
-~~~
-
-这么分拆，(2)应该很容易理解吧。那么(1)是什么样的语法？为什么中间会有 `template` 这个关键字？
 
 ## `template` disambiguator
 
@@ -103,69 +88,3 @@ while (!stack_.Empty())
     (stack_.template Pop<ValueType>(1))->~ValueType();
 ~~~
 
-另一个问题是，如果压入不同的数据类型，可能会有内存对齐问题，例如：
-
-~~~cpp
-Stack s;
-*s.Push<char>() = 'f';
-*s.Push<char>() = 'o';
-*s.Push<char>() = 'o';
-*s.Push<int >() = 123; // 对齐问题
-~~~
-
-123写入的地址不是4的倍数，在一些CPU下可能造成崩溃。如果真的要做紧凑的packing，可以用 `std::memcpy`：
-
-~~~cpp
-int i = 123;
-std::memcpy(s.Push<int>(), &i, sizeof(i));
-
-int j;
-std::memcpy(&j, s.Pop<int>(1), sizeof(j));
-~~~
-
-## 代码复用
-
-由于 RapidJSON 不依赖于 STL，在实现一些功能时缺少一些容器的帮忙。后来想到，一些地方其实可以把 `Stack` 当作可动态缩放的缓冲区来使用。例如，我们想从DOM生成JSON的字符串，就实现了 [`GenericStringBuffer`][genericstringbuffer.h]：
-
-~~~cpp
-template <typename Encoding, typename Allocator = CrtAllocator>
-class GenericStringBuffer {
-public:
-    typedef typename Encoding::Ch Ch;
-    
-    // ...    
-
-    void Put(Ch c) { *stack_.template Push<Ch>() = c; }
-
-    const Ch* GetString() const {
-        // Push and pop a null terminator. This is safe.
-        *stack_.template Push<Ch>() = '\0';
-        stack_.template Pop<Ch>(1);
-
-        return stack_.template Bottom<Ch>();
-    }
-
-    size_t GetSize() const { return stack_.GetSize(); }
-
-    // ...
-
-    mutable internal::Stack<Allocator> stack_;
-};
-~~~
-
-想在缓冲器末端加入字符，就使用 `Stack::Push<Ch>()`，想把整个缓冲取出来，就简单地回传底端的指针。不过这里有个特别的地方，因为需要空字符作结尾，在 `GetString()` 时，会压入并立即弹出一个空字符。如前所述，弹出后、压入其他东西前，刚弹出的内容仍然是合法的。而由于我们希望`GetString()` 是 `const` 函数，所以这里让 `stack_` 加上 `mutable` 修饰词。
-
-## 结语
-
-[RapidJSON][rapidjson] 为了一些内存及性能上的优化，萌生了一个混合任意类型的堆栈类 [`rapidjson::internal::Stack`][stack.h]。但使用这个类要比 STL 提供的容器危险，必须清楚每个操作的具体情况、内存对齐等问题。而带来的好处是更自由的容器内容类型，可以达到高缓存一致性（用多个 [`std::stack`][stdstack] 不利此因素），并且避免不必要内存分配、释放、对象拷贝构造等。从另一个角度看，这个类更像一种特殊的内存分配器。
-
-P.S. RapidJSON 现正参与[四月代码文化奖票选](http://code.oa.com/v2/push/cultureActivity/month/vote?id=121)，请投票鼓励！
-
-[rapidjson]: https://github.com/miloyip/rapidjson
-[userguide-zh]: http://miloyip.github.io/rapidjson/zh-cn/
-[StartArray]: https://github.com/miloyip/rapidjson/blob/v1.0.1/include/rapidjson/document.h#L1892
-[placement new]: http://en.cppreference.com/w/cpp/language/new
-[template disambiguator]: http://en.cppreference.com/w/cpp/language/dependent_name
-[stdstack]: http://en.cppreference.com/w/cpp/container/stack
-[stack.h]: https://github.com/miloyip/rapidjson/blob/v1.0.1/include/rapidjson/internal/stack.h
-[genericstringbuffer.h]: https://github.com/miloyip/rapidjson/blob/v1.0.1/include/rapidjson/stringbuffer.hgenericstringbuffer.h
