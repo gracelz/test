@@ -3,7 +3,7 @@
 
 我们先来看一行代码（[`document.h`][StartArray]）：
 
-~~~cpp
+~~~c++
 bool StartArray() {
     new (stack_.template Push<ValueType>()) ValueType(kArrayType); // <--
     return true;
